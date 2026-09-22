@@ -1,45 +1,40 @@
+import 'dart:async';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
-import 'package:blue_thermal_printer/blue_thermal_printer.dart';
+import 'package:print_bluetooth_thermal/print_bluetooth_thermal.dart';
 
-/// Bluetooth ESC/POS Thermal Printing Service
+/// Cross-Platform (iOS & Android) Bluetooth ESC/POS Thermal Printing Service
 /// Renders Flutter Arabic RTL Widgets into Monochrome Bitmaps (Luminance < 175 = Black)
 /// guaranteeing 100% Arabic font fidelity on any thermal receipt printer.
 class ThermalPrinterService {
   static final ThermalPrinterService instance = ThermalPrinterService._internal();
   ThermalPrinterService._internal();
 
-  final BlueThermalPrinter _bluetooth = BlueThermalPrinter.instance;
-  BluetoothDevice? _selectedDevice;
+  BluetoothInfo? _selectedDevice;
   bool _isConnected = false;
 
   bool get isConnected => _isConnected;
-  BluetoothDevice? get selectedDevice => _selectedDevice;
+  BluetoothInfo? get selectedDevice => _selectedDevice;
 
-  /// Fetch paired Bluetooth thermal printers
-  Future<List<BluetoothDevice>> getPairedDevices() async {
+  /// Fetch paired Bluetooth thermal printers on iOS or Android
+  Future<List<BluetoothInfo>> getPairedDevices() async {
     try {
-      final List<BluetoothDevice> devices = await _bluetooth.getBondedDevices();
+      final List<BluetoothInfo> devices = await PrintBluetoothThermal.pairedBluetooths;
       return devices;
     } catch (e) {
-      debugPrint('Error getting bonded bluetooth devices: $e');
+      debugPrint('Error getting bluetooth devices: $e');
       return [];
     }
   }
 
-  /// Connect to a thermal printer
-  Future<bool> connect(BluetoothDevice device) async {
+  /// Connect to a thermal printer using MAC / UUID
+  Future<bool> connect(String macAddress) async {
     try {
-      final connected = await _bluetooth.isConnected ?? false;
-      if (connected) {
-        await _bluetooth.disconnect();
-      }
-      await _bluetooth.connect(device);
-      _selectedDevice = device;
-      _isConnected = true;
-      return true;
+      final bool connected = await PrintBluetoothThermal.connect(macPrinterAddress: macAddress);
+      _isConnected = connected;
+      return connected;
     } catch (e) {
       debugPrint('Failed to connect to printer: $e');
       _isConnected = false;
@@ -50,7 +45,7 @@ class ThermalPrinterService {
   /// Disconnect current printer
   Future<void> disconnect() async {
     try {
-      await _bluetooth.disconnect();
+      await PrintBluetoothThermal.disconnect;
       _isConnected = false;
     } catch (e) {
       debugPrint('Error disconnecting printer: $e');
@@ -76,7 +71,6 @@ class ThermalPrinterService {
       final int height = image.height;
 
       // Convert RGBA into Monochrome 1-bit / high contrast Grayscale
-      // Luminance Formula: Y = 0.299*R + 0.587*G + 0.114*B
       final Uint8List processedRgba = Uint8List(rgbaBytes.length);
 
       for (int i = 0; i < rgbaBytes.length; i += 4) {
@@ -124,24 +118,14 @@ class ThermalPrinterService {
   /// Sends receipt bytes to Bluetooth printer with paper feed and cut
   Future<bool> printArabicReceipt(Uint8List imageBytes) async {
     try {
-      final isStillConnected = await _bluetooth.isConnected ?? false;
+      final isStillConnected = await PrintBluetoothThermal.connectionStatus;
       if (!isStillConnected) {
         debugPrint('Printer not connected - receipt simulated successfully');
         return false;
       }
 
-      // 1. Initialize printer
-      await _bluetooth.printNewLine();
-
-      // 2. Print high-contrast raster image
-      await _bluetooth.printImageBytes(imageBytes);
-
-      // 3. Feed paper and space
-      await _bluetooth.printNewLine();
-      await _bluetooth.printNewLine();
-      await _bluetooth.paperCut();
-
-      return true;
+      final result = await PrintBluetoothThermal.writeBytes(imageBytes);
+      return result;
     } catch (e) {
       debugPrint('Error transmitting print job: $e');
       return false;
